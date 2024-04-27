@@ -187,8 +187,68 @@ void remove_file_from_archive(const char *archive_path, const char *file_name) {
     }
 }
 
+// Функция для компиляции программы
+void compile_program() {
+    system("gcc -o date_corrector date_corrector.c -lz");
+}
+
+// Функция для запуска программы
+void run_program() {
+    system("./date_corrector <начальная_директория>");
+}
+
+// Функция для отображения меню и обработки выбора пользователя
+void display_menu(const char *archive_path) {
+    int choice;
+    printf("\nМеню:\n");
+    printf("1. Корректировка дат файлов в архиве\n");
+    printf("2. Просмотр содержимого архива\n");
+    printf("3. Добавление файла в архив\n");
+    printf("4. Удаление файла из архива\n");
+    printf("5. Выход\n");
+    printf("Выберите действие: ");
+    scanf("%d", &choice);
+
+    switch (choice) {
+        case 1:
+            correct_file_dates(archive_path);
+            break;
+        case 2:
+            view_archive_contents(archive_path);
+            break;
+        case 3: {
+            char file_path[PATH_MAX];
+            printf("Введите путь к файлу для добавления в архив: ");
+            scanf("%s", file_path);
+            add_file_to_archive(archive_path, file_path);
+            break;
+        }
+        case 4: {
+            char file_name[PATH_MAX];
+            printf("Введите имя файла для удаления из архива: ");
+            scanf("%s", file_name);
+            remove_file_from_archive(archive_path, file_name);
+            break;
+        }
+        case 5:
+            printf("Программа завершена.\n");
+            exit(EXIT_SUCCESS);
+        default:
+            printf("Некорректный выбор. Пожалуйста, выберите снова.\n");
+            break;
+    }
+}
+
+// Функция для обработки выбора архива и отображения меню
+void process_selected_archive(const char *archive_path) {
+    // Отображаем меню для выбранного архива
+    while (1) {
+        display_menu(archive_path);
+    }
+}
+
 // Функция для поиска архивов в директории и её поддиректориях
-void find_archives(const char *dir_path) {
+void find_archives(const char *dir_path, char archives[][PATH_MAX], int *num_archives) {
     DIR *dir = opendir(dir_path);
     if (!dir) {
         perror("Ошибка при открытии директории");
@@ -200,35 +260,54 @@ void find_archives(const char *dir_path) {
         if (entry->d_type == DT_REG) {
             char *ext = strrchr(entry->d_name, '.');
             if (ext != NULL && strcmp(ext, ".zip") == 0) {
-                printf("Найден архив: %s/%s\n", dir_path, entry->d_name);
-                correct_file_dates(entry->d_name);
+                snprintf(archives[*num_archives], PATH_MAX, "%s/%s", dir_path, entry->d_name);
+                (*num_archives)++;
             }
         } else if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
             char subdir_path[PATH_MAX];
             snprintf(subdir_path, sizeof(subdir_path), "%s/%s", dir_path, entry->d_name);
-            find_archives(subdir_path); // Рекурсивный вызов для обхода поддиректорий
+            find_archives(subdir_path, archives, num_archives); // Рекурсивный вызов для обхода поддиректорий
         }
     }
 
     closedir(dir);
 }
 
-// Функция для компиляции программы
-void compile_program() {
-    system("gcc -o date_corrector date_corrector.c -lz");
-}
-
-// Функция для запуска программы
-void run_program() {
-    system("./date_corrector <начальная_директория>");
-}
-
 int main() {
     // Компилируем программу
     compile_program();
 
-    // Запускаем программу
-    run_program();
+    // Укажите начальную директорию для поиска архивов
+    const char *start_dir = ".";
+
+    // Находим все архивы в указанной директории и ее поддиректориях
+    char archives[100][PATH_MAX]; // Массив для хранения найденных архивов
+    int num_archives = 0;
+    find_archives(start_dir, archives, &num_archives);
+
+    if (num_archives == 0) {
+        printf("В указанной директории и её поддиректориях не найдено архивов.\n");
+        return EXIT_FAILURE;
+    }
+
+    printf("Найденные архивы:\n");
+    for (int i = 0; i < num_archives; ++i) {
+        printf("%d. %s\n", i + 1, archives[i]);
+    }
+
+    int selected_archive;
+    printf("Выберите номер архива для продолжения: ");
+    scanf("%d", &selected_archive);
+
+    if (selected_archive < 1 || selected_archive > num_archives) {
+        printf("Некорректный выбор архива.\n");
+        return EXIT_FAILURE;
+    }
+
+    const char *archive_path = archives[selected_archive - 1];
+
+    // Обрабатываем выбранный архив
+    process_selected_archive(archive_path);
 
     return EXIT_SUCCESS;
 }
