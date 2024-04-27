@@ -1,45 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <unistd.h>
+#include <utime.h>
 #include <zlib.h>
-
-// Функция для проверки существования файла или директории
-int file_exists(const char *path) {
-    struct stat buffer;
-    return (stat(path, &buffer) == 0);
-}
-
-// Функция для поиска архивов в директории и её поддиректориях
-void find_archives(const char *dir_path) {
-    DIR *dir = opendir(dir_path);
-    if (!dir) {
-        perror("Ошибка при открытии директории");
-        return;
-    }
-
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_REG) {
-            char *ext = strrchr(entry->d_name, '.');
-            if (ext != NULL && strcmp(ext, ".zip") == 0) {
-                printf("Найден архив: %s/%s\n", dir_path, entry->d_name);
-                char archive_path[PATH_MAX];
-                snprintf(archive_path, sizeof(archive_path), "%s/%s", dir_path, entry->d_name);
-                correct_file_dates(archive_path);
-            }
-        } else if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
-            char subdir_path[PATH_MAX];
-            snprintf(subdir_path, sizeof(subdir_path), "%s/%s", dir_path, entry->d_name);
-            find_archives(subdir_path); // Рекурсивный вызов для обхода поддиректорий
-        }
-    }
-
-    closedir(dir);
-}
 
 // Функция для определения максимальной даты изменения файла указанного типа
 time_t max_file_mtime(const char *dir_path, const char *file_ext) {
@@ -142,6 +110,107 @@ void correct_file_dates(const char *archive_path) {
             break;
         }
     }
+}
+
+// Функция для просмотра содержимого архива
+void view_archive_contents(const char *archive_path) {
+    gzFile archive = gzopen(archive_path, "rb");
+    if (!archive) {
+        perror("Ошибка при открытии архива");
+        return;
+    }
+
+    char buffer[1024];
+    int num_read;
+    printf("Содержимое архива %s:\n", archive_path);
+    while ((num_read = gzread(archive, buffer, sizeof(buffer))) > 0) {
+        printf("%.*s", num_read, buffer);
+    }
+
+    gzclose(archive);
+}
+
+// Функция для добавления файла в архив
+void add_file_to_archive(const char *archive_path, const char *file_path) {
+    gzFile archive = gzopen(archive_path, "ab");
+    if (!archive) {
+        perror("Ошибка при открытии архива для добавления файла");
+        return;
+    }
+
+    FILE *file = fopen(file_path, "rb");
+    if (!file) {
+        perror("Ошибка при открытии файла для добавления в архив");
+        gzclose(archive);
+        return;
+    }
+
+    char buffer[1024];
+    int num_read;
+    while ((num_read = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        gzwrite(archive, buffer, num_read);
+    }
+
+    fclose(file);
+    gzclose(archive);
+}
+
+// Функция для удаления файла из архива
+void remove_file_from_archive(const char *archive_path, const char *file_name) {
+    gzFile archive = gzopen(archive_path, "rb");
+    if (!archive) {
+        perror("Ошибка при открытии архива для удаления файла");
+        return;
+    }
+
+    gzFile temp_archive = gzopen("tempfile", "wb");
+    if (!temp_archive) {
+        perror("Ошибка при создании временного файла");
+        gzclose(archive);
+        return;
+    }
+
+    char buffer[1024];
+    int num_read;
+    while ((num_read = gzread(archive, buffer, sizeof(buffer))) > 0) {
+        if (strstr(buffer, file_name) == NULL) {
+            gzwrite(temp_archive, buffer, num_read);
+        }
+    }
+
+    gzclose(archive);
+    gzclose(temp_archive);
+
+    if (rename("tempfile", archive_path) != 0) {
+        perror("Ошибка при замене архива");
+        return;
+    }
+}
+
+// Функция для поиска архивов в директории и её поддиректориях
+void find_archives(const char *dir_path) {
+    DIR *dir = opendir(dir_path);
+    if (!dir) {
+        perror("Ошибка при открытии директории");
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_type == DT_REG) {
+            char *ext = strrchr(entry->d_name, '.');
+            if (ext != NULL && strcmp(ext, ".zip") == 0) {
+                printf("Найден архив: %s/%s\n", dir_path, entry->d_name);
+                correct_file_dates(entry->d_name);
+            }
+        } else if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+            char subdir_path[PATH_MAX];
+            snprintf(subdir_path, sizeof(subdir_path), "%s/%s", dir_path, entry->d_name);
+            find_archives(subdir_path); // Рекурсивный вызов для обхода поддиректорий
+        }
+    }
+
+    closedir(dir);
 }
 
 // Функция для компиляции программы
