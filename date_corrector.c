@@ -187,14 +187,18 @@ void remove_file_from_archive(const char *archive_path, const char *file_name) {
     }
 }
 
-// Функция для компиляции программы
-void compile_program() {
-    system("gcc -o date_corrector date_corrector.c -lz");
-}
+// Функция для проверки выполнения корректировки дат
+int check_correction_done(const char *archive_path) {
+    struct stat st;
+    if (stat(archive_path, &st) != 0) {
+        perror("Ошибка при получении информации об архиве");
+        return 0;
+    }
 
-// Функция для запуска программы
-void run_program() {
-    system("./date_corrector <начальная_директория>");
+    time_t mtime = st.st_mtime;
+    time_t current_time = time(NULL);
+
+    return difftime(current_time, mtime) <= 0;
 }
 
 // Функция для отображения меню и обработки выбора пользователя
@@ -205,7 +209,8 @@ void display_menu(const char *archive_path) {
     printf("2. Просмотр содержимого архива\n");
     printf("3. Добавление файла в архив\n");
     printf("4. Удаление файла из архива\n");
-    printf("5. Выход\n");
+    printf("5. Проверка выполнения корректировки дат\n");
+    printf("6. Выход\n");
     printf("Выберите действие: ");
     scanf("%d", &choice);
 
@@ -231,6 +236,13 @@ void display_menu(const char *archive_path) {
             break;
         }
         case 5:
+            if (check_correction_done(archive_path)) {
+                printf("Корректировка дат выполнена.\n");
+            } else {
+                printf("Корректировка дат не выполнена.\n");
+            }
+            break;
+        case 6:
             printf("Программа завершена.\n");
             exit(EXIT_SUCCESS);
         default:
@@ -271,6 +283,16 @@ void find_archives(const char *dir_path, char archives[][PATH_MAX], int *num_arc
     }
 
     closedir(dir);
+}
+
+// Функция для компиляции программы
+void compile_program() {
+    system("gcc -o date_corrector date_corrector.c -lz");
+}
+
+// Функция для запуска программы
+void run_program() {
+    system("./date_corrector <начальная_директория>");
 }
 
 int main() {
