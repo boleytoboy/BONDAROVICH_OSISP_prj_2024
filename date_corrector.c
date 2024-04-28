@@ -59,8 +59,25 @@ void correct_file_dates(const char *archive_path) {
     char choice;
 
     while (1) {
-        printf("Введите тип файла для корректировки дат (например, txt): ");
-        scanf("%s", file_ext);
+        // Предопределенные типы файлов
+        const char *file_types[] = {"txt", "jpg", "png", "pdf", "doc"};
+        int num_file_types = sizeof(file_types) / sizeof(file_types[0]);
+
+        printf("Выберите тип файла для корректировки дат:\n");
+        for (int i = 0; i < num_file_types; ++i) {
+            printf("%d. %s\n", i + 1, file_types[i]);
+        }
+
+        int selected_type;
+        printf("Введите номер типа файла: ");
+        scanf("%d", &selected_type);
+
+        if (selected_type < 1 || selected_type > num_file_types) {
+            printf("Некорректный выбор типа файла.\n");
+            return;
+        }
+
+    strcpy(file_ext, file_types[selected_type - 1]);
 
         printf("Введите путь к директории с файлами: ");
         scanf("%s", dir_path);
