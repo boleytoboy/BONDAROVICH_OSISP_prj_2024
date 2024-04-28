@@ -170,63 +170,6 @@ void view_archive_contents_with_dates(const char *archive_path) {
     gzclose(archive);
 }
 
-// Функция для добавления файла в архив
-void add_file_to_archive(const char *archive_path, const char *file_path) {
-    gzFile archive = gzopen(archive_path, "ab");
-    if (!archive) {
-        perror("Ошибка при открытии архива для добавления файла");
-        return;
-    }
-
-    FILE *file = fopen(file_path, "rb");
-    if (!file) {
-        perror("Ошибка при открытии файла для добавления в архив");
-        gzclose(archive);
-        return;
-    }
-
-    char buffer[1024];
-    int num_read;
-    while ((num_read = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        gzwrite(archive, buffer, num_read);
-    }
-
-    fclose(file);
-    gzclose(archive);
-}
-
-// Функция для удаления файла из архива
-void remove_file_from_archive(const char *archive_path, const char *file_name) {
-    gzFile archive = gzopen(archive_path, "rb");
-    if (!archive) {
-        perror("Ошибка при открытии архива для удаления файла");
-        return;
-    }
-
-    gzFile temp_archive = gzopen("tempfile", "wb");
-    if (!temp_archive) {
-        perror("Ошибка при создании временного файла");
-        gzclose(archive);
-        return;
-    }
-
-    char buffer[1024];
-    int num_read;
-    while ((num_read = gzread(archive, buffer, sizeof(buffer))) > 0) {
-        if (strstr(buffer, file_name) == NULL) {
-            gzwrite(temp_archive, buffer, num_read);
-        }
-    }
-
-    gzclose(archive);
-    gzclose(temp_archive);
-
-    if (rename("tempfile", archive_path) != 0) {
-        perror("Ошибка при замене архива");
-        return;
-    }
-}
-
 // Функция для проверки выполнения корректировки дат
 int check_correction_done(const char *archive_path) {
     struct stat st;
@@ -247,11 +190,8 @@ void display_menu(const char *archive_path) {
     printf("\nМеню:\n");
     printf("1. Корректировка дат файлов в архиве\n");
     printf("2. Просмотр содержимого архива\n");
-    printf("3. Добавление файла в архив\n");
-    printf("4. Удаление файла из архива\n");
-    printf("5. Проверка выполнения корректировки дат\n");
-    printf("6. Выбор другого архива\n");
-    printf("7. Выход\n");
+    printf("3. Проверка выполнения корректировки дат\n");
+    printf("4. Выход\n");
     printf("Выберите действие: ");
     scanf("%d", &choice);
 
@@ -262,30 +202,14 @@ void display_menu(const char *archive_path) {
         case 2:
             view_archive_contents_with_dates(archive_path);
             break;
-        case 3: {
-            char file_path[PATH_MAX];
-            printf("Введите путь к файлу для добавления в архив: ");
-            scanf("%s", file_path);
-            add_file_to_archive(archive_path, file_path);
-            break;
-        }
-        case 4: {
-            char file_name[PATH_MAX];
-            printf("Введите имя файла для удаления из архива: ");
-            scanf("%s", file_name);
-            remove_file_from_archive(archive_path, file_name);
-            break;
-        }
-        case 5:
+        case 3:
             if (check_correction_done(archive_path)) {
                 printf("Корректировка дат выполнена.\n");
             } else {
                 printf("Корректировка дат не выполнена.\n");
             }
             break;
-        case 6:
-            return; // Возврат к выбору архива
-        case 7:
+        case 4:
             printf("Программа завершена.\n");
             exit(EXIT_SUCCESS);
         default:
