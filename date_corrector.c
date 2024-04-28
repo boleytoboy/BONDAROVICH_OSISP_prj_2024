@@ -210,7 +210,8 @@ void display_menu(const char *archive_path) {
     printf("3. Добавление файла в архив\n");
     printf("4. Удаление файла из архива\n");
     printf("5. Проверка выполнения корректировки дат\n");
-    printf("6. Выход\n");
+    printf("6. Выбор другого архива\n");
+    printf("7. Выход\n");
     printf("Выберите действие: ");
     scanf("%d", &choice);
 
@@ -243,6 +244,8 @@ void display_menu(const char *archive_path) {
             }
             break;
         case 6:
+            return; // Возврат к выбору архива
+        case 7:
             printf("Программа завершена.\n");
             exit(EXIT_SUCCESS);
         default:
