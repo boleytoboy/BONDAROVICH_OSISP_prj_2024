@@ -20,6 +20,12 @@ time_t max_file_mtime(const char *dir_path, const char *file_ext) {
         exit(EXIT_FAILURE);
     }
 
+    // Переменные для хранения информации о файле с максимальной датой изменения
+    char max_file_name[PATH_MAX] = "";
+    struct stat max_file_stat;
+
+    printf("Файлы типа %s в директории %s:\n", file_ext, dir_path);
+
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_REG) {
             char *ext = strrchr(entry->d_name, '.');
@@ -28,19 +34,27 @@ time_t max_file_mtime(const char *dir_path, const char *file_ext) {
                 char file_path[PATH_MAX];
                 snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
                 if (stat(file_path, &st) == 0) {
+                    printf("%s - %s", entry->d_name, ctime(&st.st_mtime)); // Выводим имя файла и его дату изменения
                     if (st.st_mtime > max_mtime) {
                         max_mtime = st.st_mtime;
+                        strcpy(max_file_name, entry->d_name);
+                        max_file_stat = st;
                     }
                 }
             }
-        } else if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
-            char subdir_path[PATH_MAX];
-            snprintf(subdir_path, sizeof(subdir_path), "%s/%s", dir_path, entry->d_name);
-            max_mtime = max_file_mtime(subdir_path, file_ext); // Рекурсивный вызов для обхода поддиректорий
         }
     }
 
     closedir(dir);
+
+    // Вывод информации о файле с максимальной датой изменения
+    if (max_mtime != 0) {
+        printf("Максимальная дата изменения для файлов типа %s: %s", file_ext, ctime(&max_file_stat.st_mtime));
+        printf("Файл с максимальной датой изменения: %s\n", max_file_name);
+    } else {
+        printf("В директории нет файлов типа %s\n", file_ext);
+    }
+
     return max_mtime;
 }
 
@@ -77,7 +91,7 @@ void correct_file_dates(const char *archive_path) {
             return;
         }
 
-    strcpy(file_ext, file_types[selected_type - 1]);
+        strcpy(file_ext, file_types[selected_type - 1]);
 
         printf("Введите путь к директории с файлами: ");
         scanf("%s", dir_path);
