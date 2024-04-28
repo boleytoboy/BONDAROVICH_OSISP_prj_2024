@@ -9,67 +9,96 @@
 #include <utime.h>
 #include <zlib.h>
 
-// Функция для определения максимальной даты изменения файла указанного типа
-time_t max_file_mtime(const char *dir_path, const char *file_ext) {
+// Функция для получения максимальной даты изменения файла указанного типа в архиве
+time_t max_file_mtime_in_archive(const char *archive_path, const char *file_ext) {
     time_t max_mtime = 0;
-    struct dirent *entry;
-    DIR *dir = opendir(dir_path);
 
-    if (dir == NULL) {
-        perror("Ошибка при открытии директории");
-        exit(EXIT_FAILURE);
+    // Открываем архив для чтения
+    gzFile archive = gzopen(archive_path, "rb");
+    if (!archive) {
+        perror("Ошибка при открытии архива");
+        return max_mtime;
     }
 
-    // Переменные для хранения информации о файле с максимальной датой изменения
-    char max_file_name[PATH_MAX] = "";
-    struct stat max_file_stat;
+    // Структура для хранения информации о файле в архиве
+    gz_header header;
+    int ret;
 
-    printf("Файлы типа %s в директории %s:\n", file_ext, dir_path);
-
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_REG) {
-            char *ext = strrchr(entry->d_name, '.');
-            if (ext != NULL && strcmp(ext, file_ext) == 0) {
-                struct stat st;
-                char file_path[PATH_MAX];
-                snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
-                if (stat(file_path, &st) == 0) {
-                    printf("%s - %s", entry->d_name, ctime(&st.st_mtime)); // Выводим имя файла и его дату изменения
-                    if (st.st_mtime > max_mtime) {
-                        max_mtime = st.st_mtime;
-                        strcpy(max_file_name, entry->d_name);
-                        max_file_stat = st;
-                    }
-                }
+    // Читаем заголовок каждого файла в архиве
+    while ((ret = gzread(archive, &header, sizeof(gz_header))) > 0) {
+        // Получаем имя файла из заголовка
+        char *ext = strrchr(header.name, '.');
+        if (ext != NULL && strcmp(ext, file_ext) == 0) {
+            // Получаем информацию о файле
+            struct stat st;
+            if (stat(header.name, &st) == 0 && st.st_mtime > max_mtime) {
+                max_mtime = st.st_mtime;
             }
         }
+
+        // Пропускаем содержимое файла
+        gzseek(archive, header.extra_len + header.name_len + header.comment_len, SEEK_CUR);
     }
 
-    closedir(dir);
-
-    // Вывод информации о файле с максимальной датой изменения
-    if (max_mtime != 0) {
-        printf("Максимальная дата изменения для файлов типа %s: %s", file_ext, ctime(&max_file_stat.st_mtime));
-        printf("Файл с максимальной датой изменения: %s\n", max_file_name);
-    } else {
-        printf("В директории нет файлов типа %s\n", file_ext);
-    }
+    gzclose(archive);
 
     return max_mtime;
 }
 
-// Функция для установки времени последней модификации файла
-void set_file_mtime(const char *file_path, time_t mtime) {
-    struct utimbuf new_times;
-    new_times.actime = mtime;
-    new_times.modtime = mtime;
-    utime(file_path, &new_times);
+// Функция для установки времени последней модификации файла в архиве
+void set_archive_file_mtime(const char *archive_path, const char *file_ext, time_t mtime) {
+    // Открываем архив для чтения и записи
+    gzFile archive = gzopen(archive_path, "rb");
+    if (!archive) {
+        perror("Ошибка при открытии архива");
+        return;
+    }
+
+    // Создаем временный файл для записи обновленного содержимого архива
+    gzFile temp_archive = gzopen("tempfile", "wb");
+    if (!temp_archive) {
+        perror("Ошибка при создании временного файла");
+        gzclose(archive);
+        return;
+    }
+
+    // Структура для хранения информации о файле в архиве
+    gz_header header;
+    int ret;
+
+    // Читаем заголовок каждого файла в архиве
+    while ((ret = gzread(archive, &header, sizeof(gz_header))) > 0) {
+        // Получаем имя файла из заголовка
+        char *ext = strrchr(header.name, '.');
+        if (ext != NULL && strcmp(ext, file_ext) == 0) {
+            // Устанавливаем новую дату изменения файла
+            struct utimbuf new_times;
+            new_times.actime = mtime;
+            new_times.modtime = mtime;
+            utime(header.name, &new_times);
+        }
+
+        // Записываем заголовок и содержимое файла во временный архив
+        gzwrite(temp_archive, &header, sizeof(gz_header));
+        char buffer[1024];
+        int num_read;
+        while ((num_read = gzread(archive, buffer, sizeof(buffer))) > 0) {
+            gzwrite(temp_archive, buffer, num_read);
+        }
+    }
+
+    gzclose(archive);
+    gzclose(temp_archive);
+
+    // Заменяем исходный архив временным файлом
+    if (rename("tempfile", archive_path) != 0) {
+        perror("Ошибка при замене архива");
+        return;
+    }
 }
 
 // Функция для корректировки дат файлов указанного типа в архиве
 void correct_file_dates(const char *archive_path) {
-    char file_ext[10];
-    char dir_path[PATH_MAX];
     char choice;
 
     while (1) {
@@ -91,49 +120,16 @@ void correct_file_dates(const char *archive_path) {
             return;
         }
 
-        strcpy(file_ext, file_types[selected_type - 1]);
-
-        printf("Введите путь к директории с файлами: ");
-        scanf("%s", dir_path);
+        const char *file_ext = file_types[selected_type - 1];
 
         // Получаем максимальную дату изменения файла указанного типа
-        time_t max_mtime = max_file_mtime(dir_path, file_ext);
-
-        // Открываем архив для чтения и записи
-        gzFile archive = gzopen(archive_path, "rb");
-        if (!archive) {
-            perror("Ошибка при открытии архива");
-            return;
-        }
-
-        // Перебираем файлы в архиве и устанавливаем им максимальную дату
-        gzFile outfile = gzopen("tempfile", "wb");
-        if (!outfile) {
-            perror("Ошибка при создании временного файла");
-            gzclose(archive);
-            return;
-        }
-
-        char buffer[1024];
-        int num_read;
-        while ((num_read = gzread(archive, buffer, sizeof(buffer))) > 0) {
-            gzwrite(outfile, buffer, num_read);
-        }
-
-        gzclose(archive);
-        gzclose(outfile);
-
-        // Заменяем исходный архив временным файлом
-        if (rename("tempfile", archive_path) != 0) {
-            perror("Ошибка при замене архива");
-            return;
-        }
+        time_t max_mtime = max_file_mtime_in_archive(archive_path, file_ext);
 
         // Устанавливаем максимальную дату изменения для всех файлов в архиве указанного типа
-        set_file_mtime(archive_path, max_mtime);
+        set_archive_file_mtime(archive_path, file_ext, max_mtime);
 
-        printf("Максимальная дата изменения для файлов типа %s в директории %s установлена в %s\n",
-               file_ext, dir_path, ctime(&max_mtime));
+        printf("Максимальная дата изменения для файлов типа %s в архиве %s установлена в %s\n",
+               file_ext, archive_path, ctime(&max_mtime));
 
         printf("Продолжить корректировку дат для других файлов? (y/n): ");
         scanf(" %c", &choice);
