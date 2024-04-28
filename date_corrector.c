@@ -8,6 +8,9 @@
 #include <unistd.h>
 #include <utime.h>
 #include <zlib.h>
+#include <libgen.h> 
+
+#define PATH_MAX 4096
 
 // Функция для получения максимальной даты изменения файла указанного типа в архиве
 time_t max_file_mtime_in_archive(const char *archive_path, const char *file_ext) {
@@ -37,7 +40,8 @@ time_t max_file_mtime_in_archive(const char *archive_path, const char *file_ext)
         }
 
         // Пропускаем содержимое файла
-        gzseek(archive, header.extra_len + header.name_len + header.comment_len, SEEK_CUR);
+        gzseek(archive, header.extra_len + strlen(header.name) + 1, SEEK_CUR);
+
     }
 
     gzclose(archive);
@@ -139,7 +143,7 @@ void correct_file_dates(const char *archive_path) {
     }
 }
 
-// Функция для просмотра содержимого архива с датами файлов
+// Функция для просмотра содержимого текстовых файлов в архиве с датами
 void view_archive_contents_with_dates(const char *archive_path) {
     gzFile archive = gzopen(archive_path, "rb");
     if (!archive) {
@@ -149,32 +153,22 @@ void view_archive_contents_with_dates(const char *archive_path) {
 
     printf("Содержимое архива %s:\n", archive_path);
 
-    // Структура для хранения информации о файле в архиве
-    gz_header header;
-    int ret;
+    // Буфер для чтения данных из архива
+    char buffer[1024];
+    int num_read;
 
-    // Читаем заголовок каждого файла в архиве
-    while ((ret = gzread(archive, &header, sizeof(gz_header))) > 0) {
-        // Выводим имя файла
-        printf("Имя файла: %s\n", header.name);
+    // Читаем содержимое архива
+    while ((num_read = gzread(archive, buffer, sizeof(buffer))) > 0) {
+        // Выводим содержимое на экран
+        fwrite(buffer, 1, num_read, stdout);
+    }
 
-        // Получаем информацию о файле
-        struct stat st;
-        if (stat(header.name, &st) != 0) {
-            perror("Ошибка при получении информации о файле");
-            return;
-        }
-
-        // Выводим дату последней модификации файла
-        printf("Дата последней модификации: %s", ctime(&st.st_mtime));
-
-        // Пропускаем содержимое файла
-        gzseek(archive, header.extra_len + header.name_len + header.comment_len, SEEK_CUR);
+    if (num_read < 0) {
+        perror("Ошибка при чтении архива");
     }
 
     gzclose(archive);
 }
-
 
 // Функция для добавления файла в архив
 void add_file_to_archive(const char *archive_path, const char *file_path) {
@@ -266,7 +260,7 @@ void display_menu(const char *archive_path) {
             correct_file_dates(archive_path);
             break;
         case 2:
-            view_archive_contents(archive_path);
+            view_archive_contents_with_dates(archive_path);
             break;
         case 3: {
             char file_path[PATH_MAX];
@@ -320,7 +314,7 @@ void find_archives(const char *dir_path, char archives[][PATH_MAX], int *num_arc
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_REG) {
             char *ext = strrchr(entry->d_name, '.');
-            if (ext != NULL && strcmp(ext, ".zip") == 0) {
+            if (ext != NULL && strcmp(ext, ".gz") == 0) {
                 snprintf(archives[*num_archives], PATH_MAX, "%s/%s", dir_path, entry->d_name);
                 (*num_archives)++;
             }
@@ -334,22 +328,9 @@ void find_archives(const char *dir_path, char archives[][PATH_MAX], int *num_arc
     closedir(dir);
 }
 
-// Функция для компиляции программы
-void compile_program() {
-    system("gcc -o date_corrector date_corrector.c -lz");
-}
-
-// Функция для запуска программы
-void run_program() {
-    system("./date_corrector <начальная_директория>");
-}
-
 int main() {
-    // Компилируем программу
-    compile_program();
-
     // Укажите начальную директорию для поиска архивов
-    const char *start_dir = ".";
+    const char *start_dir = "/home/xleb";
 
     // Находим все архивы в указанной директории и ее поддиректориях
     char archives[100][PATH_MAX]; // Массив для хранения найденных архивов
