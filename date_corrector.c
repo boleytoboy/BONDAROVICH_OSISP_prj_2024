@@ -112,23 +112,42 @@ void correct_file_dates(const char *archive_path) {
     }
 }
 
-// Функция для просмотра содержимого архива
-void view_archive_contents(const char *archive_path) {
+// Функция для просмотра содержимого архива с датами файлов
+void view_archive_contents_with_dates(const char *archive_path) {
     gzFile archive = gzopen(archive_path, "rb");
     if (!archive) {
         perror("Ошибка при открытии архива");
         return;
     }
 
-    char buffer[1024];
-    int num_read;
     printf("Содержимое архива %s:\n", archive_path);
-    while ((num_read = gzread(archive, buffer, sizeof(buffer))) > 0) {
-        printf("%.*s", num_read, buffer);
+
+    // Структура для хранения информации о файле в архиве
+    gz_header header;
+    int ret;
+
+    // Читаем заголовок каждого файла в архиве
+    while ((ret = gzread(archive, &header, sizeof(gz_header))) > 0) {
+        // Выводим имя файла
+        printf("Имя файла: %s\n", header.name);
+
+        // Получаем информацию о файле
+        struct stat st;
+        if (stat(header.name, &st) != 0) {
+            perror("Ошибка при получении информации о файле");
+            return;
+        }
+
+        // Выводим дату последней модификации файла
+        printf("Дата последней модификации: %s", ctime(&st.st_mtime));
+
+        // Пропускаем содержимое файла
+        gzseek(archive, header.extra_len + header.name_len + header.comment_len, SEEK_CUR);
     }
 
     gzclose(archive);
 }
+
 
 // Функция для добавления файла в архив
 void add_file_to_archive(const char *archive_path, const char *file_path) {
