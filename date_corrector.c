@@ -6,140 +6,81 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
-#include <utime.h>
 #include <zlib.h>
-#include <libgen.h> 
+#include <tar.h>
+#include <stdint.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <utime.h>
+#include <archive.h>
+#include <archive_entry.h>
+#include <stdbool.h>
 
 #define PATH_MAX 4096
 
-// Функция для получения максимальной даты изменения файла указанного типа в архиве
-time_t max_file_mtime_in_archive(const char *archive_path, const char *file_ext) {
-    time_t max_mtime = 0;
+typedef struct posix_header
+{                              /* byte offset */
+    char name[100];               /*   0 */
+    char mode[8];                 /* 100 */
+    char uid[8];                  /* 108 */
+    char gid[8];                  /* 116 */
+    char size[12];
+    char mtime[12];               /* 136 */
+    char chksum[8];               /* 148 */
+    char typeflag;                /* 156 */
+    char linkname[100];           /* 157 */
+    char magic[6];                /* 257 */
+    char version[2];              /* 263 */
+    char uname[32];               /* 265 */
+    char gname[32];               /* 297 */
+    char devmajor[8];             /* 329 */
+    char devminor[8];             /* 337 */
+    char prefix[155];             /* 345 */
+    /* 500 */
+} posix_header;
 
-    // Открываем архив для чтения
-    gzFile archive = gzopen(archive_path, "rb");
-    if (!archive) {
-        perror("Ошибка при открытии архива");
-        return max_mtime;
+int next_file_in_tar(gzFile* archive, posix_header* header_out) {
+    static char buffer[512];
+    posix_header* header = (posix_header*)buffer;
+
+    int num_read = gzread(*archive, buffer, 512);
+
+    char size_str[13] = { '\0' };
+    memcpy(size_str, header->size, sizeof(header->size));
+    uint64_t size = strtol(size_str, NULL, 8);
+
+    if (size % 512 != 0) {
+        size += 512 - (size % 512);
     }
 
-    // Структура для хранения информации о файле в архиве
-    gz_header header;
-    int ret;
+    // Пропускаем содержимое файла
+    gzseek(*archive, size, SEEK_CUR);
 
-    // Читаем заголовок каждого файла в архиве
-    while ((ret = gzread(archive, &header, sizeof(gz_header))) > 0) {
-        // Получаем имя файла из заголовка
-        char *ext = strrchr(header.name, '.');
-        if (ext != NULL && strcmp(ext, file_ext) == 0) {
-            // Получаем информацию о файле
-            struct stat st;
-            if (stat(header.name, &st) == 0 && st.st_mtime > max_mtime) {
-                max_mtime = st.st_mtime;
-            }
-        }
-
-        // Пропускаем содержимое файла
-        gzseek(archive, header.extra_len + strlen(header.name) + 1, SEEK_CUR);
-
+    if (header->name[0] != '\0' && num_read == 512) {
+        *header_out = *header;
+        return num_read + size;
     }
-
-    gzclose(archive);
-
-    return max_mtime;
-}
-
-// Функция для установки времени последней модификации файла в архиве
-void set_archive_file_mtime(const char *archive_path, const char *file_ext, time_t mtime) {
-    // Открываем архив для чтения и записи
-    gzFile archive = gzopen(archive_path, "rb");
-    if (!archive) {
-        perror("Ошибка при открытии архива");
-        return;
-    }
-
-    // Создаем временный файл для записи обновленного содержимого архива
-    gzFile temp_archive = gzopen("tempfile", "wb");
-    if (!temp_archive) {
-        perror("Ошибка при создании временного файла");
-        gzclose(archive);
-        return;
-    }
-
-    // Структура для хранения информации о файле в архиве
-    gz_header header;
-    int ret;
-
-    // Читаем заголовок каждого файла в архиве
-    while ((ret = gzread(archive, &header, sizeof(gz_header))) > 0) {
-        // Получаем имя файла из заголовка
-        char *ext = strrchr(header.name, '.');
-        if (ext != NULL && strcmp(ext, file_ext) == 0) {
-            // Устанавливаем новую дату изменения файла
-            struct utimbuf new_times;
-            new_times.actime = mtime;
-            new_times.modtime = mtime;
-            utime(header.name, &new_times);
-        }
-
-        // Записываем заголовок и содержимое файла во временный архив
-        gzwrite(temp_archive, &header, sizeof(gz_header));
-        char buffer[1024];
-        int num_read;
-        while ((num_read = gzread(archive, buffer, sizeof(buffer))) > 0) {
-            gzwrite(temp_archive, buffer, num_read);
-        }
-    }
-
-    gzclose(archive);
-    gzclose(temp_archive);
-
-    // Заменяем исходный архив временным файлом
-    if (rename("tempfile", archive_path) != 0) {
-        perror("Ошибка при замене архива");
-        return;
+    else {
+        return 0;
     }
 }
 
-// Функция для корректировки дат файлов указанного типа в архиве
-void correct_file_dates(const char *archive_path) {
-    char choice;
+void view_arcive_contents(gzFile* archive) {
+    posix_header header;
+    int num_read = 0;
 
-    while (1) {
-        // Предопределенные типы файлов
-        const char *file_types[] = {"txt", "jpg", "png", "pdf", "doc"};
-        int num_file_types = sizeof(file_types) / sizeof(file_types[0]);
+    // Читаем содержимое архива
+    while ((num_read = next_file_in_tar(archive, &header)) != 0) {
+        // Дата последней модификации
+        char mtime_str[13] = { '\0' };
+        memcpy(mtime_str, header.mtime, sizeof(header.mtime));
+        time_t mtime = strtol(mtime_str, NULL, 8);
 
-        printf("Выберите тип файла для корректировки дат:\n");
-        for (int i = 0; i < num_file_types; ++i) {
-            printf("%d. %s\n", i + 1, file_types[i]);
-        }
-
-        int selected_type;
-        printf("Введите номер типа файла: ");
-        scanf("%d", &selected_type);
-
-        if (selected_type < 1 || selected_type > num_file_types) {
-            printf("Некорректный выбор типа файла.\n");
-            return;
-        }
-
-        const char *file_ext = file_types[selected_type - 1];
-
-        // Получаем максимальную дату изменения файла указанного типа
-        time_t max_mtime = max_file_mtime_in_archive(archive_path, file_ext);
-
-        // Устанавливаем максимальную дату изменения для всех файлов в архиве указанного типа
-        set_archive_file_mtime(archive_path, file_ext, max_mtime);
-
-        printf("Максимальная дата изменения для файлов типа %s в архиве %s установлена в %s\n",
-               file_ext, archive_path, ctime(&max_mtime));
-
-        printf("Продолжить корректировку дат для других файлов? (y/n): ");
-        scanf(" %c", &choice);
-        if (choice != 'y') {
-            break;
-        }
+        // Размер файла
+        char size_str[13] = { '\0' };
+        memcpy(size_str, header.size, sizeof(header.size));
+        uint64_t size = strtol(size_str, NULL, 8);
+        printf("Файл: %s: %llu байт: %s", header.name, (unsigned long long)size, ctime(&mtime));
     }
 }
 
@@ -153,35 +94,132 @@ void view_archive_contents_with_dates(const char *archive_path) {
 
     printf("Содержимое архива %s:\n", archive_path);
 
-    // Буфер для чтения данных из архива
-    char buffer[1024];
-    int num_read;
-
-    // Читаем содержимое архива
-    while ((num_read = gzread(archive, buffer, sizeof(buffer))) > 0) {
-        // Выводим содержимое на экран
-        fwrite(buffer, 1, num_read, stdout);
-    }
-
-    if (num_read < 0) {
-        perror("Ошибка при чтении архива");
-    }
+    view_arcive_contents(&archive);
 
     gzclose(archive);
 }
 
-// Функция для проверки выполнения корректировки дат
-int check_correction_done(const char *archive_path) {
-    struct stat st;
-    if (stat(archive_path, &st) != 0) {
-        perror("Ошибка при получении информации об архиве");
-        return 0;
+void print_checksum(posix_header* header) {
+    char sum_str[9] = { '\0' };
+    memcpy(sum_str, header->chksum, sizeof(header->chksum));
+    uint64_t checksum = strtol(sum_str, NULL, 8);
+
+    printf("Checksum: %u\n", checksum);
+
+    uint64_t sum = 0;
+    for (int i = 0; i < sizeof(posix_header); ++i) {
+        sum += ((const char*)header)[i];
     }
 
-    time_t mtime = st.st_mtime;
+    uint64_t other = 0;
+    for (int i = 0; i < sizeof(header->chksum); ++i) {
+        other += header->chksum[i];
+    }
+
+    printf("Sum: %u : %u : %u\n", sum, other, sum - other);
+}
+
+void copy_archive(gzFile* src, FILE* dst, posix_header* header) {
+    gzseek(*src, 0, SEEK_SET);
+
+    static char buffer[512] = { '\0' };
+    int num_read = 0;
+
+    while ((num_read = gzread(*src, buffer, 512)) > 0) {
+        posix_header* curr_file = (posix_header*)buffer;
+
+        if (memcmp(curr_file->name, header->name, sizeof(header->name)) == 0) {
+            memcpy(curr_file->mtime, header->mtime, sizeof(header->mtime));
+        }
+
+        fwrite(buffer, 512, 1, dst);
+    }
+
+    return;
+}
+
+void archivate(FILE* file, const char* path) {
+    gzFile arch = gzopen(path, "wb");
+
+    fseek(file, 0, SEEK_END);
+    off_t size = ftell(file);
+
+    if (size % 512 != 0)
+        size += 512 - (size % 512);
+    
+    size /= 512;
+
+    char buffer[512] = { '\0' };
+
+    fseek(file, 0, SEEK_SET);
+
+    for (int i = 0; i < size; ++i) {
+        fread(buffer, 512, 1, file);
+        gzwrite(arch, buffer, 512);
+    }
+
+    gzclose(arch);
+}
+
+// Функция для корректировки дат файлов указанного типа в архиве
+void correct_file_dates(const char *archive_path) {
+    char choice;
+    // Открываем архив
+
+    char temp_path[256] = { '\0' };
+
+    strcat(temp_path, archive_path);
+    strcat(temp_path, ".temp.tar");
+    
+    printf("temp file path: %s\n", temp_path);
+
+    FILE* temp_arch = fopen(temp_path, "w");
+    gzFile archive = gzopen(archive_path, "rb");
+    if (!archive || !temp_arch) {
+        perror("Ошибка при открытии архива");
+        return;
+    }
+
+    printf("Выберите файл для корректировки дат:\n");
+
+    posix_header header;
+    int num_read = 0;
+
+    {
+        int file_num = 0;
+
+        // Читаем содержимое архива
+        while ((num_read = next_file_in_tar(&archive, &header)) != 0) {
+            file_num++;
+            printf("%u. %s\n", file_num, header.name);
+        }
+
+        scanf("%u", &file_num);
+        gzseek(archive, 0, SEEK_SET);
+
+        for (int i = 0; i < file_num; ++i) {
+            num_read = next_file_in_tar(&archive, &header);
+        }
+    }
+
+    char mtime_str[13] = { '\0' };
+    memcpy(mtime_str, header.mtime, sizeof(header.mtime));
+    time_t mtime = strtol(mtime_str, NULL, 8);
+    printf("Дата последней модификации: %s", ctime(&mtime));
+
     time_t current_time = time(NULL);
 
-    return difftime(current_time, mtime) <= 0;
+    sprintf(header.mtime, "%12o", current_time);
+    printf("Новое время: %s, %012o", ctime(&current_time), current_time);
+
+    copy_archive(&archive, temp_arch, &header);
+
+    gzclose(archive);
+    fclose(temp_arch);
+
+    temp_arch = fopen(temp_path, "r");
+    archivate(temp_arch, archive_path);
+    fclose(temp_arch);
 }
 
 // Функция для отображения меню и обработки выбора пользователя
@@ -190,8 +228,7 @@ void display_menu(const char *archive_path) {
     printf("\nМеню:\n");
     printf("1. Корректировка дат файлов в архиве\n");
     printf("2. Просмотр содержимого архива\n");
-    printf("3. Проверка выполнения корректировки дат\n");
-    printf("4. Выход\n");
+    printf("3. Выход\n");
     printf("Выберите действие: ");
     scanf("%d", &choice);
 
@@ -203,13 +240,6 @@ void display_menu(const char *archive_path) {
             view_archive_contents_with_dates(archive_path);
             break;
         case 3:
-            if (check_correction_done(archive_path)) {
-                printf("Корректировка дат выполнена.\n");
-            } else {
-                printf("Корректировка дат не выполнена.\n");
-            }
-            break;
-        case 4:
             printf("Программа завершена.\n");
             exit(EXIT_SUCCESS);
         default:
@@ -251,6 +281,7 @@ void find_archives(const char *dir_path, char archives[][PATH_MAX], int *num_arc
 
     closedir(dir);
 }
+
 
 int main() {
     // Укажите начальную директорию для поиска архивов
